@@ -1,0 +1,17 @@
+[ MANIFEST ]
+Changelog for the JSON project. 
+This CHANGELOG operates as a root glossary, manifest, and enumeration of edits to a repository
+This log follows a modified (simpler) semantic versioning system: RELEASE.FEATURE/COMMIT
+
+[ GLOSSARY ]
+{word} {definition}
+
+[ TODO ]
+{Todo}
+  * {Points}
+  * {}
+    * {} ({comment})
+
+[ RELEASED ]
+v0.0/{commit hash} {A description of no more than 10 words}
+
