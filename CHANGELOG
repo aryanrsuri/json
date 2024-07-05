@@ -13,5 +13,5 @@ This log follows a modified (simpler) semantic versioning system: RELEASE.FEATUR
     * {} ({comment})
 
 [ RELEASED ]
-v0.0/{commit hash} {A description of no more than 10 words}
+v0.0/d664c1b Json Scanner and tokeniser, no nesting support besides the token
 
