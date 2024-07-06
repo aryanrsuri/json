@@ -8,12 +8,13 @@ Look into ./CHANGELOG for better and more information about the project.
 
 ## TODO
 
-* [ X ] Remove the `Token { .ch: []const u8}` type, since there is no need to hold those literals.They really just mark the stack structure which is handleled by the state/other tokens
-
+* [X] Remove the `Token { .ch: []const u8}` type, since there is no need to hold those literals.They really just mark the stack structure which is handleled by the state/other tokens
+* [X] (CORE) Implement a stack to track nesting of objects/arrays
+* [ ] (CORE) Implement a hashmap for the tokens
 
 ## Example
 
-`
+```
     const file =
         \\{
         \\  "Image": {
@@ -30,9 +31,9 @@ Look into ./CHANGELOG for better and more information about the project.
         \\    }
         \\}
     ;
-`
+```
 
-`
+```
 >> zig  build run
 nesting: 1      token: json.Token{ .object_start = void }
 nesting: 1      token: json.Token{ .string = { 73, 109, 97, 103, 101 } }
@@ -66,4 +67,4 @@ nesting: 3      token: json.Token{ .number = { 51, 56, 55, 57, 51 } }
 nesting: 2      token: json.Token{ .array_end = void }
 nesting: 1      token: json.Token{ .object_end = void }
 nesting: 0      token: json.Token{ .object_end = void }
-`
+```
