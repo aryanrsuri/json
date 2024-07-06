@@ -5,36 +5,47 @@
 //! Licence: MIT
 const std = @import("std");
 
-// zig fmt: off
-pub const Token = union(enum) { 
-    array_start, array_end, 
-    object_start, object_end, 
-    number: []const u8, string: []const u8,
-    true, false, null, 
+pub const Token = union(enum) {
+    array_start,
+    array_end,
+    object_start,
+    object_end,
+    number: []const u8,
+    string: []const u8,
+    true,
+    false,
+    null,
 };
 
-pub const State = enum { 
-    object_start, array_start, 
-    value, post_value, 
-    string, number,
+pub const State = enum {
+    object_start,
+    array_start,
+    value,
+    post_value,
+    post_object_comma,
+    string,
+    number,
     end_of_document,
 };
-// zig fmt: on
 
 pub const Scanner = struct {
     buffer: []const u8 = undefined,
     state: State = .value,
     cursor: usize = 0,
     stack: std.ArrayList(u1),
+    object_key: bool = false,
+    map: std.StringArrayHashMap(?*Token),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, input: []const u8) @This() {
         const stack = std.ArrayList(u1).init(allocator);
-        return .{ .allocator = allocator, .buffer = input, .stack = stack };
+        const map = std.StringArrayHashMap(?*Token).init(allocator);
+        return .{ .allocator = allocator, .buffer = input, .stack = stack, .map = map };
     }
 
     pub fn deinit(self: *@This()) void {
         self.stack.deinit();
+        self.map.deinit();
         self.* = undefined;
     }
 
@@ -70,7 +81,6 @@ pub const Scanner = struct {
         const value_start = self.cursor;
         while (true) {
             switch (self.buffer[self.cursor]) {
-                // More explicit u8 represntation could be used here
                 33, 35...127 => self.read(),
                 else => break,
             }
@@ -117,27 +127,49 @@ pub const Scanner = struct {
             .string => {
                 switch (self.buffer[self.cursor]) {
                     '"' => self.state = .post_value,
-                    '0'...'9', 'a'...'z', 'A'...'Z', '_', '-' => return .{ .string = self.read_value() },
+                    '0'...'9', 'a'...'z', 'A'...'Z', '_' => {
+                        const string = self.read_value();
+                        if (self.object_key) {
+                            try self.map.put(string, null);
+                        }
+                        return .{ .string = string };
+                    },
                     else => return error.SyntaxError,
                 }
             },
             .post_value => {
-                switch (self.buffer[self.cursor]) {
-                    ':', ',' => self.state = .value,
-                    '}' => {
-                        if (self.stack.pop() != 0) return error.SyntaxError;
-                        token = .object_end;
-                    },
-                    ']' => {
-                        if (self.stack.pop() != 1) return error.SyntaxError;
-                        token = .array_end;
-                    },
-                    else => return error.Syntax,
+                if (self.object_key) {
+                    self.object_key = false;
+                    try switch (self.buffer[self.cursor]) {
+                        ':' => self.state = .value,
+                        else => error.SyntaxError,
+                    };
+                } else {
+                    switch (self.buffer[self.cursor]) {
+                        ',' => {
+                            switch (self.stack.getLast()) {
+                                0 => self.state = .post_object_comma,
+                                1 => self.state = .value,
+                            }
+                        },
+                        '}' => {
+                            if (self.stack.pop() != 0) return error.SyntaxError;
+                            token = .object_end;
+                        },
+                        ']' => {
+                            if (self.stack.pop() != 1) return error.SyntaxError;
+                            token = .array_end;
+                        },
+                        else => return error.SyntaxError,
+                    }
                 }
             },
             .object_start => {
                 switch (self.buffer[self.cursor]) {
-                    '"' => self.state = .string,
+                    '"' => {
+                        self.object_key = true;
+                        self.state = .string;
+                    },
                     '}' => {
                         _ = self.stack.pop();
                         token = .object_end;
@@ -157,6 +189,17 @@ pub const Scanner = struct {
                     },
                 }
             },
+            // Solved the issue of post object comma's failing to be a object key
+            // Lifted straight from: https://github.com/ziglang/zig/blob/bf588f67d8c6261105f81fd468c420d662541d2a/lib/std/json/scanner.zig#L813
+            .post_object_comma => {
+                switch (self.buffer[self.cursor]) {
+                    '"' => {
+                        self.state = .string;
+                        self.object_key = true;
+                    },
+                    else => return error.SyntaxError,
+                }
+            },
             else => error.SyntaxError,
         };
         self.read();
@@ -174,7 +217,28 @@ pub const Scanner = struct {
     }
 };
 
-test "Json" {
+test "JSON Simple" {
+    const scanner_test_simple =
+        \\  {"key":"100","key1":200}
+    ;
+    const d = std.testing.allocator;
+    var s = Scanner.init(d, scanner_test_simple);
+    defer s.deinit();
+
+    while (s.state != .end_of_document) {
+        const next = try s.next();
+        if (next) |token| {
+            var i: usize = 0;
+            while (i < s.stack.items.len) : (i += 1) {
+                std.debug.print("->", .{});
+            }
+            std.debug.print("\t{any}\n", .{token});
+        }
+    }
+    std.debug.print("map: {s}\n", .{s.map.keys()});
+}
+
+test "JSON Full" {
     // Lifted this test from scanner_test.zig from ziglang/zig REPO
     const scanner_test =
         \\{
@@ -200,7 +264,61 @@ test "Json" {
     while (s.state != .end_of_document) {
         const next = try s.next();
         if (next) |token| {
-            std.debug.print("level: {d}\ttoken: {any}\n", .{ s.stack.items.len, token });
+            var i: usize = 0;
+            while (i < s.stack.items.len) : (i += 1) {
+                std.debug.print("-", .{});
+            }
+            std.debug.print("|\t{any}\n", .{token});
         }
     }
+    std.debug.print("map: {s}\n", .{s.map.keys()});
+}
+
+test "JSON HTTP" {
+    const scanner_test =
+        \\ {
+        \\ "data": [{
+        \\  "type": "articles",
+        \\ "id": "1",
+        \\"attributes": {
+        \\ "title": "JSON:API paints my bikeshed!",
+        \\ "body": "The shortest article. Ever.",
+        \\ "created": "2015-05-22T14:56:29.000Z",
+        \\ "updated": "2015-05-22T14:56:28.000Z"
+        \\},
+        \\"relationships": {
+        \\ "author": {
+        \\  "data": {"id": "42", "type": "people"}
+        \\ }
+        \\ }
+        \\}],
+        \\"included": [
+        \\ {
+        \\  "type": "people",
+        \\ "id": "42",
+        \\ "attributes": {
+        \\  "name": "John",
+        \\ "age": 80,
+        \\ "gender": "male"
+        \\ }
+        \\ }
+        \\ ]
+        \\}
+    ;
+
+    const d = std.testing.allocator;
+    var s = Scanner.init(d, scanner_test);
+    defer s.deinit();
+
+    while (s.state != .end_of_document) {
+        const next = try s.next();
+        if (next) |token| {
+            var i: usize = 0;
+            while (i < s.stack.items.len) : (i += 1) {
+                std.debug.print("-", .{});
+            }
+            std.debug.print("|\t{any}\n", .{token});
+        }
+    }
+    std.debug.print("map: {s}\n", .{s.map.keys()});
 }
