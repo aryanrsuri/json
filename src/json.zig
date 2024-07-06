@@ -3,32 +3,21 @@
 //!
 //! Author: arysuri at proton dot me
 //! Licence: MIT
-//!
 const std = @import("std");
-
-/// Token defines the type the JSON value can take on
-/// {}  or Object
-/// []  or Array
-/// 1   or number
-/// "1" or string
-/// 0b1 or true
-/// 0b0 or false
-///     or null
 
 // zig fmt: off
 pub const Token = union(enum) { 
     array_start, array_end, 
     object_start, object_end, 
     number: []const u8, string: []const u8,
-    ch: u8,
     true, false, null, 
-    end_of_document};
+};
+
 pub const State = enum { 
     object_start, array_start, 
     value, post_value, 
-    string, end_of_document,
-    number,
-
+    string, number,
+    end_of_document,
 };
 // zig fmt: on
 
@@ -36,17 +25,20 @@ pub const Scanner = struct {
     buffer: []const u8 = undefined,
     state: State = .value,
     cursor: usize = 0,
+    stack: std.ArrayList(u1),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, input: []const u8) @This() {
-        return .{ .allocator = allocator, .buffer = input };
+        const stack = std.ArrayList(u1).init(allocator);
+        return .{ .allocator = allocator, .buffer = input, .stack = stack };
     }
 
     pub fn deinit(self: *@This()) void {
+        self.stack.deinit();
         self.* = undefined;
     }
 
-    pub fn read_boolean(self: *@This()) !Token {
+    pub fn read_scalar(self: *@This()) !Token {
         const value_start = self.cursor;
         while (std.ascii.isAlphabetic(self.buffer[self.cursor])) {
             self.read();
@@ -58,14 +50,12 @@ pub const Scanner = struct {
         }
         if (std.mem.eql(u8, slice, "false")) {
             return .false;
+        }
+        if (std.mem.eql(u8, slice, "null")) {
+            return .null;
         } else {
             return error.SyntaxError;
         }
-        // return switch (slice) {
-        //     std.mem.eql(u8, slice, "true") => .true,
-        //     std.mem.eql(u8, slice, "false") => .false,
-        //     else => error.SyntaxError,
-        // };
     }
 
     pub fn read_number(self: *@This()) []const u8 {
@@ -96,25 +86,26 @@ pub const Scanner = struct {
         }
     }
 
-    pub fn next(self: *@This()) !Token {
+    pub fn next(self: *@This()) !?Token {
         self.next_non_whitespace();
-        var token: Token = .{ .ch = self.buffer[self.cursor] };
+        var token: ?Token = null;
         try switch (self.state) {
-            // For fun, do I convert all the ASCII to its Dec representation?
             .value => {
                 switch (self.buffer[self.cursor]) {
                     '{' => {
+                        _ = try self.stack.append(0);
                         self.state = .object_start;
                         token = .object_start;
                     },
                     '[' => {
+                        _ = try self.stack.append(1);
                         self.state = .array_start;
                         token = .array_start;
                     },
                     '"' => self.state = .string,
-                    't', 'f' => {
+                    't', 'f', 'n' => {
                         self.state = .post_value;
-                        return try self.read_boolean();
+                        return try self.read_scalar();
                     },
                     '0'...'9' => {
                         self.state = .post_value;
@@ -133,21 +124,33 @@ pub const Scanner = struct {
             .post_value => {
                 switch (self.buffer[self.cursor]) {
                     ':', ',' => self.state = .value,
-                    '}' => token = .object_end,
-                    ']' => token = .array_end,
+                    '}' => {
+                        if (self.stack.pop() != 0) return error.SyntaxError;
+                        token = .object_end;
+                    },
+                    ']' => {
+                        if (self.stack.pop() != 1) return error.SyntaxError;
+                        token = .array_end;
+                    },
                     else => return error.Syntax,
                 }
             },
             .object_start => {
                 switch (self.buffer[self.cursor]) {
                     '"' => self.state = .string,
-                    '}' => token = .object_end,
+                    '}' => {
+                        _ = self.stack.pop();
+                        token = .object_end;
+                    },
                     else => return error.SyntaxError,
                 }
             },
             .array_start => {
                 switch (self.buffer[self.cursor]) {
-                    ']' => token = .array_end,
+                    ']' => {
+                        _ = self.stack.pop();
+                        token = .array_end;
+                    },
                     else => {
                         self.state = .value;
                         return token;
@@ -192,10 +195,12 @@ test "Json" {
 
     const d = std.testing.allocator;
     var s = Scanner.init(d, scanner_test);
+    defer s.deinit();
 
     while (s.state != .end_of_document) {
-        const v = try s.next();
-        // _ = v;
-        std.debug.print("Token is {any}\n", .{v});
+        const next = try s.next();
+        if (next) |token| {
+            std.debug.print("level: {d}\ttoken: {any}\n", .{ s.stack.items.len, token });
+        }
     }
 }

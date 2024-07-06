@@ -1,0 +1,297 @@
+diff --git a/CHANGELOG b/CHANGELOG
+index 5e5121a..4f02b29 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -13,6 +13,7 @@ This log follows a modified (simpler) semantic versioning system: RELEASE.FEATUR
+     * {} ({comment})
+ 
+ [ RELEASED ]
++v0.2/8128e6c Added Boolean support
+ v0.1/fd06aed Better strings, and support for array of strings
+ v0.0/d664c1b Json Scanner and tokeniser, no nesting support besides the token
+ 
+diff --git a/README.md b/README.md
+index ce3beaf..5b10ca7 100644
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-## Implementing JSON (de)serialising and tokeniser in Zig
++# Implementing JSON (de)serialising and tokeniser in Zig
+ 
+ Since this project is more about learning Zig, I will adding more 
+ structure to the patterns, things that might not be most optimal for a 
+@@ -8,5 +8,62 @@ Look into ./CHANGELOG for better and more information about the project.
+ 
+ ## TODO
+ 
+-Remove the `Token { .ch: []const u8}` type, since there is no need to hold those literals
+-They really just mark the stack structure which is handleled by the state/other tokens
++* [ X ] Remove the `Token { .ch: []const u8}` type, since there is no need to hold those literals.They really just mark the stack structure which is handleled by the state/other tokens
++
++
++## Example
++
++`
++    const file =
++        \\{
++        \\  "Image": {
++        \\      "Width":  800,
++        \\      "Height": 600,
++        \\      "Title":  "View from 15th Floor",
++        \\      "Thumbnail": {
++        \\          "Url":    "http://www.example.com/image/481989943",
++        \\          "Height": 125,
++        \\          "Width":  100
++        \\      },
++        \\      "Animated" : false,
++        \\      "IDs": [116, 943, 234, 38793]
++        \\    }
++        \\}
++    ;
++`
++
++`
++>> zig  build run
++nesting: 1      token: json.Token{ .object_start = void }
++nesting: 1      token: json.Token{ .string = { 73, 109, 97, 103, 101 } }
++nesting: 2      token: json.Token{ .object_start = void }
++nesting: 2      token: json.Token{ .string = { 87, 105, 100, 116, 104 } }
++nesting: 2      token: json.Token{ .number = { 56, 48, 48 } }
++nesting: 2      token: json.Token{ .string = { 72, 101, 105, 103, 104, 116 } }
++nesting: 2      token: json.Token{ .number = { 54, 48, 48 } }
++nesting: 2      token: json.Token{ .string = { 84, 105, 116, 108, 101 } }
++nesting: 2      token: json.Token{ .string = { 86, 105, 101, 119 } }
++nesting: 2      token: json.Token{ .string = { 102, 114, 111, 109 } }
++nesting: 2      token: json.Token{ .string = { 49, 53, 116, 104 } }
++nesting: 2      token: json.Token{ .string = { 70, 108, 111, 111, 114 } }
++nesting: 2      token: json.Token{ .string = { 84, 104, 117, 109, 98, 110, 97, 105, 108 } }
++nesting: 3      token: json.Token{ .object_start = void }
++nesting: 3      token: json.Token{ .string = { 85, 114, 108 } }
++nesting: 3      token: json.Token{ .string = { 104, 116, 116, 112, 58, 47, 47, 119, 119, 119, 46, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47, 105, 109, 97, 103, 101, 47, 52, 56, 49, 57, 56, 57, 57, 52, 51 } }
++nesting: 3      token: json.Token{ .string = { 72, 101, 105, 103, 104, 116 } }
++nesting: 3      token: json.Token{ .number = { 49, 50, 53 } }
++nesting: 3      token: json.Token{ .string = { 87, 105, 100, 116, 104 } }
++nesting: 3      token: json.Token{ .number = { 49, 48, 48 } }
++nesting: 2      token: json.Token{ .object_end = void }
++nesting: 2      token: json.Token{ .string = { 65, 110, 105, 109, 97, 116, 101, 100 } }
++nesting: 2      token: json.Token{ .false = void }
++nesting: 2      token: json.Token{ .string = { 73, 68, 115 } }
++nesting: 3      token: json.Token{ .array_start = void }
++nesting: 3      token: json.Token{ .number = { 49, 49, 54 } }
++nesting: 3      token: json.Token{ .number = { 57, 52, 51 } }
++nesting: 3      token: json.Token{ .number = { 50, 51, 52 } }
++nesting: 3      token: json.Token{ .number = { 51, 56, 55, 57, 51 } }
++nesting: 2      token: json.Token{ .array_end = void }
++nesting: 1      token: json.Token{ .object_end = void }
++nesting: 0      token: json.Token{ .object_end = void }
++`
+diff --git a/src/json.zig b/src/json.zig
+index 607358a..b20bcbb 100644
+--- a/src/json.zig
++++ b/src/json.zig
+@@ -3,32 +3,21 @@
+ //!
+ //! Author: arysuri at proton dot me
+ //! Licence: MIT
+-//!
+ const std = @import("std");
+ 
+-/// Token defines the type the JSON value can take on
+-/// {}  or Object
+-/// []  or Array
+-/// 1   or number
+-/// "1" or string
+-/// 0b1 or true
+-/// 0b0 or false
+-///     or null
+-
+ // zig fmt: off
+ pub const Token = union(enum) { 
+     array_start, array_end, 
+     object_start, object_end, 
+     number: []const u8, string: []const u8,
+-    ch: u8,
+     true, false, null, 
+-    end_of_document};
++};
++
+ pub const State = enum { 
+     object_start, array_start, 
+     value, post_value, 
+-    string, end_of_document,
+-    number,
+-
++    string, number,
++    end_of_document,
+ };
+ // zig fmt: on
+ 
+@@ -36,17 +25,20 @@ pub const Scanner = struct {
+     buffer: []const u8 = undefined,
+     state: State = .value,
+     cursor: usize = 0,
++    stack: std.ArrayList(u1),
+     allocator: std.mem.Allocator,
+ 
+     pub fn init(allocator: std.mem.Allocator, input: []const u8) @This() {
+-        return .{ .allocator = allocator, .buffer = input };
++        const stack = std.ArrayList(u1).init(allocator);
++        return .{ .allocator = allocator, .buffer = input, .stack = stack };
+     }
+ 
+     pub fn deinit(self: *@This()) void {
++        self.stack.deinit();
+         self.* = undefined;
+     }
+ 
+-    pub fn read_boolean(self: *@This()) !Token {
++    pub fn read_scalar(self: *@This()) !Token {
+         const value_start = self.cursor;
+         while (std.ascii.isAlphabetic(self.buffer[self.cursor])) {
+             self.read();
+@@ -58,14 +50,12 @@ pub const Scanner = struct {
+         }
+         if (std.mem.eql(u8, slice, "false")) {
+             return .false;
++        }
++        if (std.mem.eql(u8, slice, "null")) {
++            return .null;
+         } else {
+             return error.SyntaxError;
+         }
+-        // return switch (slice) {
+-        //     std.mem.eql(u8, slice, "true") => .true,
+-        //     std.mem.eql(u8, slice, "false") => .false,
+-        //     else => error.SyntaxError,
+-        // };
+     }
+ 
+     pub fn read_number(self: *@This()) []const u8 {
+@@ -96,25 +86,26 @@ pub const Scanner = struct {
+         }
+     }
+ 
+-    pub fn next(self: *@This()) !Token {
++    pub fn next(self: *@This()) !?Token {
+         self.next_non_whitespace();
+-        var token: Token = .{ .ch = self.buffer[self.cursor] };
++        var token: ?Token = null;
+         try switch (self.state) {
+-            // For fun, do I convert all the ASCII to its Dec representation?
+             .value => {
+                 switch (self.buffer[self.cursor]) {
+                     '{' => {
++                        _ = try self.stack.append(0);
+                         self.state = .object_start;
+                         token = .object_start;
+                     },
+                     '[' => {
++                        _ = try self.stack.append(1);
+                         self.state = .array_start;
+                         token = .array_start;
+                     },
+                     '"' => self.state = .string,
+-                    't', 'f' => {
++                    't', 'f', 'n' => {
+                         self.state = .post_value;
+-                        return try self.read_boolean();
++                        return try self.read_scalar();
+                     },
+                     '0'...'9' => {
+                         self.state = .post_value;
+@@ -133,21 +124,33 @@ pub const Scanner = struct {
+             .post_value => {
+                 switch (self.buffer[self.cursor]) {
+                     ':', ',' => self.state = .value,
+-                    '}' => token = .object_end,
+-                    ']' => token = .array_end,
++                    '}' => {
++                        if (self.stack.pop() != 0) return error.SyntaxError;
++                        token = .object_end;
++                    },
++                    ']' => {
++                        if (self.stack.pop() != 1) return error.SyntaxError;
++                        token = .array_end;
++                    },
+                     else => return error.Syntax,
+                 }
+             },
+             .object_start => {
+                 switch (self.buffer[self.cursor]) {
+                     '"' => self.state = .string,
+-                    '}' => token = .object_end,
++                    '}' => {
++                        _ = self.stack.pop();
++                        token = .object_end;
++                    },
+                     else => return error.SyntaxError,
+                 }
+             },
+             .array_start => {
+                 switch (self.buffer[self.cursor]) {
+-                    ']' => token = .array_end,
++                    ']' => {
++                        _ = self.stack.pop();
++                        token = .array_end;
++                    },
+                     else => {
+                         self.state = .value;
+                         return token;
+@@ -192,10 +195,12 @@ test "Json" {
+ 
+     const d = std.testing.allocator;
+     var s = Scanner.init(d, scanner_test);
++    defer s.deinit();
+ 
+     while (s.state != .end_of_document) {
+-        const v = try s.next();
+-        // _ = v;
+-        std.debug.print("Token is {any}\n", .{v});
++        const next = try s.next();
++        if (next) |token| {
++            std.debug.print("level: {d}\ttoken: {any}\n", .{ s.stack.items.len, token });
++        }
+     }
+ }
+diff --git a/src/main.zig b/src/main.zig
+index bb979dd..afa7df3 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -3,16 +3,29 @@ const Scanner = @import("json.zig").Scanner;
+ 
+ pub fn main() !void {
+     const file =
+-        \\{"this": "value", "number": 100, "array": [1,2,3], "array of strings": ["1","2"]}
++        \\{
++        \\  "Image": {
++        \\      "Width":  800,
++        \\      "Height": 600,
++        \\      "Title":  "View from 15th Floor",
++        \\      "Thumbnail": {
++        \\          "Url":    "http://www.example.com/image/481989943",
++        \\          "Height": 125,
++        \\          "Width":  100
++        \\      },
++        \\      "Animated" : false,
++        \\      "IDs": [116, 943, 234, 38793]
++        \\    }
++        \\}
+     ;
+-    // const f =
+-    //     \\{"this":"is", "that": 400, "things": [1,2,3]}
+-    // ;
+     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+     const allocator = gpa.allocator();
+-    var s = Scanner.init(allocator, file);
+-    while (s.state != .end_of_document) {
+-        const v = try s.next();
+-        std.debug.print("Token is {any}\n", .{v});
++    var scanner = Scanner.init(allocator, file);
++    defer scanner.deinit();
++    while (scanner.state != .end_of_document) {
++        const next = try scanner.next();
++        if (next) |token| {
++            std.debug.print("nesting: {d}\ttoken: {any}\n", .{ scanner.stack.items.len, token });
++        }
+     }
+ }
