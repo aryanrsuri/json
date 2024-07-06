@@ -1,6 +1,3 @@
-const std = @import("std");
-const Scanner = @import("json.zig").Scanner;
-
 pub fn main() !void {
     const file =
         \\{
@@ -18,14 +15,9 @@ pub fn main() !void {
         \\    }
         \\}
     ;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = @import("std").heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    var scanner = Scanner.init(allocator, file);
+    var scanner = @import("json.zig").Scanner.init(allocator, file);
     defer scanner.deinit();
-    while (scanner.state != .end_of_document) {
-        const next = try scanner.next();
-        if (next) |token| {
-            std.debug.print("nesting: {d}\ttoken: {any}\n", .{ scanner.stack.items.len, token });
-        }
-    }
+    _ = try scanner.debug();
 }
