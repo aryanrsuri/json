@@ -46,6 +46,28 @@ pub const Scanner = struct {
         self.* = undefined;
     }
 
+    pub fn read_boolean(self: *@This()) !Token {
+        const value_start = self.cursor;
+        while (std.ascii.isAlphabetic(self.buffer[self.cursor])) {
+            self.read();
+        }
+
+        const slice = self.buffer[value_start..self.cursor];
+        if (std.mem.eql(u8, slice, "true")) {
+            return .true;
+        }
+        if (std.mem.eql(u8, slice, "false")) {
+            return .false;
+        } else {
+            return error.SyntaxError;
+        }
+        // return switch (slice) {
+        //     std.mem.eql(u8, slice, "true") => .true,
+        //     std.mem.eql(u8, slice, "false") => .false,
+        //     else => error.SyntaxError,
+        // };
+    }
+
     pub fn read_number(self: *@This()) []const u8 {
         const value_start = self.cursor;
         while (std.ascii.isDigit(self.buffer[self.cursor])) {
@@ -56,8 +78,12 @@ pub const Scanner = struct {
 
     pub fn read_value(self: *@This()) []const u8 {
         const value_start = self.cursor;
-        while (std.ascii.isAlphanumeric(self.buffer[self.cursor]) or self.buffer[self.cursor] == '_' or self.buffer[self.cursor] == ' ' or self.buffer[self.cursor] == '-') {
-            self.read();
+        while (true) {
+            switch (self.buffer[self.cursor]) {
+                // More explicit u8 represntation could be used here
+                33, 35...127 => self.read(),
+                else => break,
+            }
         }
         return self.buffer[value_start..self.cursor];
     }
@@ -86,8 +112,11 @@ pub const Scanner = struct {
                         token = .array_start;
                     },
                     '"' => self.state = .string,
+                    't', 'f' => {
+                        self.state = .post_value;
+                        return try self.read_boolean();
+                    },
                     '0'...'9' => {
-                        std.debug.print("digit value", .{});
                         self.state = .post_value;
                         return .{ .number = self.read_number() };
                     },
@@ -127,7 +156,6 @@ pub const Scanner = struct {
             },
             else => error.SyntaxError,
         };
-        // std.debug.print("State is {any}\nChar is {c}\nToken recieved is {any}\n\n", .{ self.state, self.buffer[self.cursor], token });
         self.read();
         return token;
     }
@@ -144,28 +172,26 @@ pub const Scanner = struct {
 };
 
 test "Json" {
-    const f =
-        \\{"this":"is", "that": 400, "things": [1,2,3]}
+    // Lifted this test from scanner_test.zig from ziglang/zig REPO
+    const scanner_test =
+        \\{
+        \\  "Image": {
+        \\      "Width":  800,
+        \\      "Height": 600,
+        \\      "Title":  "View from 15th Floor",
+        \\      "Thumbnail": {
+        \\          "Url":    "http://www.example.com/image/481989943",
+        \\          "Height": 125,
+        \\          "Width":  100
+        \\      },
+        \\      "Animated" : false,
+        \\      "IDs": [116, 943, 234, 38793]
+        \\    }
+        \\}
     ;
-    // const f =
-    //     \\{
-    //     \\  "Image": {
-    //     \\      "Width":  800,
-    //     \\      "Height": 600,
-    //     \\      "Title":  "View from 15th Floor",
-    //     \\      "Thumbnail": {
-    //     \\          "Url":    "http://www.example.com/image/481989943",
-    //     \\          "Height": 125,
-    //     \\          "Width":  100
-    //     \\      },
-    //     \\      "Animated" : false,
-    //     \\      "IDs": [116, 943, 234, 38793]
-    //     \\    }
-    //     \\}
-    // ;
 
     const d = std.testing.allocator;
-    var s = Scanner.init(d, f);
+    var s = Scanner.init(d, scanner_test);
 
     while (s.state != .end_of_document) {
         const v = try s.next();
