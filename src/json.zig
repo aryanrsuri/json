@@ -56,7 +56,7 @@ pub const Scanner = struct {
 
     pub fn read_value(self: *@This()) []const u8 {
         const value_start = self.cursor;
-        while (std.ascii.isAlphanumeric(self.buffer[self.cursor])) {
+        while (std.ascii.isAlphanumeric(self.buffer[self.cursor]) or self.buffer[self.cursor] == '_' or self.buffer[self.cursor] == ' ' or self.buffer[self.cursor] == '-') {
             self.read();
         }
         return self.buffer[value_start..self.cursor];
@@ -97,7 +97,7 @@ pub const Scanner = struct {
             .string => {
                 switch (self.buffer[self.cursor]) {
                     '"' => self.state = .post_value,
-                    'a'...'z', 'A'...'Z', '_', '-' => return .{ .string = self.read_value() },
+                    '0'...'9', 'a'...'z', 'A'...'Z', '_', '-' => return .{ .string = self.read_value() },
                     else => return error.SyntaxError,
                 }
             },
