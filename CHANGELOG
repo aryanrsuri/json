@@ -13,6 +13,7 @@ This log follows a modified (simpler) semantic versioning system: RELEASE.FEATUR
     * {} ({comment})
 
 [ RELEASED ]
+v0.3/673f7af Added null type support, and logic for array/object nesting
 v0.2/8128e6c Added Boolean support
 v0.1/fd06aed Better strings, and support for array of strings
 v0.0/d664c1b Json Scanner and tokeniser, no nesting support besides the token
