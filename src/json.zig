@@ -49,7 +49,7 @@ pub const Scanner = struct {
         self.* = undefined;
     }
 
-    pub fn read_scalar(self: *@This()) !Token {
+    fn read_scalar(self: *@This()) !Token {
         const value_start = self.cursor;
         while (std.ascii.isAlphabetic(self.buffer[self.cursor])) {
             self.read();
@@ -69,7 +69,7 @@ pub const Scanner = struct {
         }
     }
 
-    pub fn read_number(self: *@This()) []const u8 {
+    fn read_number(self: *@This()) []const u8 {
         const value_start = self.cursor;
         while (std.ascii.isDigit(self.buffer[self.cursor])) {
             self.read();
@@ -77,7 +77,7 @@ pub const Scanner = struct {
         return self.buffer[value_start..self.cursor];
     }
 
-    pub fn read_value(self: *@This()) []const u8 {
+    fn read_value(self: *@This()) []const u8 {
         const value_start = self.cursor;
         while (true) {
             switch (self.buffer[self.cursor]) {
@@ -88,7 +88,7 @@ pub const Scanner = struct {
         return self.buffer[value_start..self.cursor];
     }
 
-    pub fn read(self: *@This()) void {
+    fn read(self: *@This()) void {
         if (self.cursor + 1 >= self.buffer.len) {
             self.state = .end_of_document;
         } else {
@@ -206,14 +206,24 @@ pub const Scanner = struct {
         return token;
     }
 
-    pub fn peek(self: *@This()) u8 {
-        return self.buffer[self.cursor + 1];
-    }
-
     fn next_non_whitespace(self: *@This()) void {
         while (std.ascii.isWhitespace(self.buffer[self.cursor])) {
             self.read();
         }
+    }
+
+    pub fn debug(self: *@This()) !void {
+        while (self.state != .end_of_document) {
+            const ntoken = try self.next();
+            if (ntoken) |token| {
+                var i: usize = 0;
+                while (i < self.stack.items.len) : (i += 1) {
+                    std.debug.print("->", .{});
+                }
+                std.debug.print("\t{any}\n", .{token});
+            }
+        }
+        std.debug.print("map: {s}\n", .{self.map.keys()});
     }
 };
 
@@ -260,18 +270,7 @@ test "JSON Full" {
     const d = std.testing.allocator;
     var s = Scanner.init(d, scanner_test);
     defer s.deinit();
-
-    while (s.state != .end_of_document) {
-        const next = try s.next();
-        if (next) |token| {
-            var i: usize = 0;
-            while (i < s.stack.items.len) : (i += 1) {
-                std.debug.print("-", .{});
-            }
-            std.debug.print("|\t{any}\n", .{token});
-        }
-    }
-    std.debug.print("map: {s}\n", .{s.map.keys()});
+    _ = try s.debug();
 }
 
 test "JSON HTTP" {
@@ -309,16 +308,5 @@ test "JSON HTTP" {
     const d = std.testing.allocator;
     var s = Scanner.init(d, scanner_test);
     defer s.deinit();
-
-    while (s.state != .end_of_document) {
-        const next = try s.next();
-        if (next) |token| {
-            var i: usize = 0;
-            while (i < s.stack.items.len) : (i += 1) {
-                std.debug.print("-", .{});
-            }
-            std.debug.print("|\t{any}\n", .{token});
-        }
-    }
-    std.debug.print("map: {s}\n", .{s.map.keys()});
+    _ = try s.debug();
 }
