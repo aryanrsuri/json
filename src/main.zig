@@ -1,3 +1,4 @@
+const std = @import("std");
 pub fn main() !void {
     const file =
         \\{
@@ -17,7 +18,7 @@ pub fn main() !void {
     ;
     var gpa = @import("std").heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    var scanner = @import("json.zig").Scanner.init(allocator, file);
+    var scanner = @import("scanner.zig").Scanner.init(allocator, file);
     defer scanner.deinit();
     _ = try scanner.debug();
 }

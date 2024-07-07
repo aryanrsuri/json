@@ -15,7 +15,19 @@ pub const Token = union(enum) {
     true,
     false,
     null,
+
+    pub fn debug(self: @This()) void {
+        std.debug.print("\t{any}\n", .{self});
+    }
 };
+
+pub fn token_to_bool(token: Token) !bool {
+    return switch (token) {
+        .true => true,
+        .false => false,
+        else => error.ParseError,
+    };
+}
 
 pub const State = enum {
     object_start,
@@ -34,17 +46,20 @@ pub const Scanner = struct {
     cursor: usize = 0,
     stack: std.ArrayList(u1),
     object_key: bool = false,
+    // TODO: abstract out to struct
     map: std.StringArrayHashMap(?*Token),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, input: []const u8) @This() {
         const stack = std.ArrayList(u1).init(allocator);
+        // TODO: abstract out to struct
         const map = std.StringArrayHashMap(?*Token).init(allocator);
         return .{ .allocator = allocator, .buffer = input, .stack = stack, .map = map };
     }
 
     pub fn deinit(self: *@This()) void {
         self.stack.deinit();
+        // TODO: abstract out to struct
         self.map.deinit();
         self.* = undefined;
     }
@@ -71,7 +86,7 @@ pub const Scanner = struct {
 
     fn read_number(self: *@This()) []const u8 {
         const value_start = self.cursor;
-        while (std.ascii.isDigit(self.buffer[self.cursor])) {
+        while (std.ascii.isDigit(self.buffer[self.cursor]) or self.buffer[self.cursor] == '.') {
             self.read();
         }
         return self.buffer[value_start..self.cursor];
@@ -129,9 +144,6 @@ pub const Scanner = struct {
                     '"' => self.state = .post_value,
                     '0'...'9', 'a'...'z', 'A'...'Z', '_' => {
                         const string = self.read_value();
-                        if (self.object_key) {
-                            try self.map.put(string, null);
-                        }
                         return .{ .string = string };
                     },
                     else => return error.SyntaxError,
@@ -220,10 +232,83 @@ pub const Scanner = struct {
                 while (i < self.stack.items.len) : (i += 1) {
                     std.debug.print("->", .{});
                 }
-                std.debug.print("\t{any}\n", .{token});
+                token.debug();
             }
         }
-        std.debug.print("map: {s}\n", .{self.map.keys()});
+        std.debug.print("\n", .{});
+    }
+};
+
+// Values maps the Scanner Token to the Zig scalar
+
+pub const Value = union(enum) {
+    null,
+    bool: bool,
+    string: []const u8,
+    number: []const u8,
+    array: std.ArrayList(Value),
+    object: std.StringHashMap(?Value),
+};
+
+pub const Reader = struct {
+    scanner: Scanner,
+    json: std.ArrayList(*Value),
+
+    // TODO: Remove, this is just to make this code compile
+    keys: std.ArrayList([]const u8),
+    values: std.ArrayList(Value),
+
+    inner_key: []const u8 = undefined,
+
+    pub fn init(allocator: std.mem.Allocator, input: []const u8) @This() {
+        const json = std.ArrayList(*Value).init(allocator);
+        const keys = std.ArrayList([]const u8).init(allocator);
+        const values = std.ArrayList(Value).init(allocator);
+        return .{ .scanner = Scanner.init(allocator, input), .json = json, .keys = keys, .values = values };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.scanner.deinit();
+        self.json.deinit();
+        self.keys.deinit();
+        self.values.deinit();
+        self.* = undefined;
+    }
+
+    pub fn parse(self: *@This()) !void {
+        while (self.scanner.state != .end_of_document) {
+            const token = try self.scanner.next();
+            if (token) |tok| {
+                switch (tok) {
+                    .object_start, .array_start => {
+                        // TODO: Inner Parse to collect children into parent Object Value
+                        // _ = try self.inner_parse();
+                        _ = try self.parse();
+                    },
+                    .string => {
+                        if (self.scanner.object_key) {
+                            self.inner_key = tok.string;
+
+                            _ = try self.keys.append(self.inner_key);
+                        } else {
+                            _ = try self.values.append(.{ .string = tok.string });
+                        }
+                    },
+                    .number => {
+                        _ = try self.values.append(.{ .number = tok.number });
+                    },
+                    .true, .false => {
+                        const scalar = try token_to_bool(tok);
+                        _ = try self.values.append(.{ .bool = scalar });
+                    },
+                    .null => {
+                        _ = try self.values.append(.null);
+                    },
+
+                    else => {},
+                }
+            }
+        }
     }
 };
 
@@ -234,18 +319,7 @@ test "JSON Simple" {
     const d = std.testing.allocator;
     var s = Scanner.init(d, scanner_test_simple);
     defer s.deinit();
-
-    while (s.state != .end_of_document) {
-        const next = try s.next();
-        if (next) |token| {
-            var i: usize = 0;
-            while (i < s.stack.items.len) : (i += 1) {
-                std.debug.print("->", .{});
-            }
-            std.debug.print("\t{any}\n", .{token});
-        }
-    }
-    std.debug.print("map: {s}\n", .{s.map.keys()});
+    _ = try s.debug();
 }
 
 test "JSON Full" {
@@ -309,4 +383,52 @@ test "JSON HTTP" {
     var s = Scanner.init(d, scanner_test);
     defer s.deinit();
     _ = try s.debug();
+}
+
+test "JSON Scanner Verbose" {
+    const scanner_test =
+        \\{
+        \\  "Image": {
+        \\      "Width":  800,
+        \\      "Height": 600,
+        \\      "Title":  "View from 15th Floor",
+        \\      "Thumbnail": {
+        \\          "Url":    "http://www.example.com/image/481989943",
+        \\          "Height": 125,
+        \\          "Width":  100
+        \\      },
+        \\      "Animated" : false,
+        \\      "IDs": [116, 943, 234, 38793],
+        \\      "ArrayOfObject": [{"n": "m"}],
+        \\      "double": 1.3412,
+        \\      "LargeInt": 18446744073709551615
+        \\    }
+        \\}
+    ;
+    const d = std.testing.allocator;
+    var s = Scanner.init(d, scanner_test);
+    defer s.deinit();
+    _ = try s.debug();
+}
+
+test "Reader" {
+    const scanner_test =
+        \\{
+        \\  "Image": {
+        \\      "Width":  800,
+        \\      "Height": 300,
+        \\      "Title": "View"
+        \\  }
+        \\}
+    ;
+    const d = std.testing.allocator;
+    var s = Reader.init(d, scanner_test);
+    _ = try s.parse();
+    for (s.keys.items) |item| {
+        std.debug.print("{s}\n", .{item});
+    }
+    for (s.values.items) |item| {
+        std.debug.print("{any}\n", .{item});
+    }
+    defer s.deinit();
 }
